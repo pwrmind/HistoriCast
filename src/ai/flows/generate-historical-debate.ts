@@ -307,7 +307,15 @@ const generateHistoricalDebateFlow = ai.defineFlow(
 
     const transcript: {speaker: string; text: string; audioFile?: string}[] = [];
     
-    const participantPersonas = participants.map(id => {
+    // Ensure participants is always an array
+    const participantIds = Array.isArray(participants) ? participants : [];
+    
+    // Add validation for participant count
+    if (participantIds.length < 2) {
+        throw new Error('At least 2 participants are required');
+    }
+
+    const participantPersonas = participantIds.map(id => {
         if (!(personas as any)[id]) {
             throw new Error(`Invalid participant ID: ${id}`);
         }
