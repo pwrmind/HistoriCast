@@ -256,7 +256,7 @@ const generateHistoricalDebateFlow = ai.defineFlow(
           topic: topic,
           persona: persona,
           round: round,
-          transcript: transcript, // Pass the full transcript object
+          transcript: transcript,
         };
 
         const response = await ai.generate({
@@ -330,7 +330,7 @@ const generateHistoricalDebateFlow = ai.defineFlow(
               console.error('Error running ffmpeg', e);
               podcastFile = ''; // Reset if ffmpeg fails
             } finally {
-              await fs.unlink(concatListPath);
+              await fs.unlink(concatListPath).catch(console.error);
             }
         }
     }
