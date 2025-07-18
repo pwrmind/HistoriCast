@@ -2,7 +2,7 @@
 'use server';
 
 /**
- * @fileOverview Generates a historical debate podcast between specified figures.
+ * @fileOverview Generates a historical debate podcast between specified figures, guided by a moderator.
  *
  * - generateHistoricalDebate - A function to generate the debate podcast.
  * - GenerateHistoricalDebateInput - The input type for the generateHistoricalDebate function.
@@ -221,6 +221,7 @@ const debatePrompt = ai.definePrompt({
   },
   prompt: `{{{persona.systemPrompt}}}\n
 You are participating in a debate about {{{topic}}}. This is round {{{round}}}.\n
+The moderator just asked a question or made a statement. Respond to the moderator and other participants.\n
 Previous turns:
 {{#each transcript}}
 {{{speaker}}}: {{{text}}}
@@ -228,6 +229,71 @@ Previous turns:
 
 Respond with 1-2 sentences.`,
 });
+
+const moderatorIntroPrompt = ai.definePrompt({
+    name: 'moderatorIntroPrompt',
+    input: {
+        schema: z.object({
+            topic: z.string(),
+            participants: z.array(PersonaSchema),
+        }),
+    },
+    output: { schema: z.string() },
+    prompt: `You are the moderator of a debate.
+Topic: {{{topic}}}.
+Participants: {{#each participants}}{{{name}}}{{#unless @last}}, {{/unless}}{{/each}}.
+Introduce the topic and the participants in 1-2 sentences.`,
+});
+
+const moderatorTransitionPrompt = ai.definePrompt({
+    name: 'moderatorTransitionPrompt',
+    input: {
+        schema: z.object({
+            topic: z.string(),
+            round: z.number(),
+            transcript: z.array(
+                z.object({
+                    speaker: z.string(),
+                    text: z.string(),
+                    audioFile: z.string().optional(),
+                })
+            ),
+        }),
+    },
+    output: { schema: z.string() },
+    prompt: `You are the moderator of a debate on the topic: {{{topic}}}.
+It is the beginning of round {{{round}}}.
+Review the transcript and ask a follow-up question to the participants to keep the debate moving. Keep it to one sentence.
+Previous turns:
+{{#each transcript}}
+{{{speaker}}}: {{{text}}}
+{{/each}}`,
+});
+
+const moderatorOutroPrompt = ai.definePrompt({
+    name: 'moderatorOutroPrompt',
+    input: {
+        schema: z.object({
+            topic: z.string(),
+            transcript: z.array(
+                z.object({
+                    speaker: z.string(),
+                    text: z.string(),
+                    audioFile: z.string().optional(),
+                })
+            ),
+        }),
+    },
+    output: { schema: z.string() },
+    prompt: `You are the moderator of a debate on the topic: {{{topic}}}.
+The debate has concluded.
+Briefly summarize the debate in 1-2 sentences and thank the participants.
+Transcript:
+{{#each transcript}}
+{{{speaker}}}: {{{text}}}
+{{/each}}`,
+});
+
 
 const generateHistoricalDebateFlow = ai.defineFlow(
   {
@@ -240,34 +306,20 @@ const generateHistoricalDebateFlow = ai.defineFlow(
     const useLocalTTS = process.env.USE_LOCAL_TTS === 'true';
 
     const transcript: {speaker: string; text: string; audioFile?: string}[] = [];
+    
+    const participantPersonas = participants.map(id => {
+        if (!(personas as any)[id]) {
+            throw new Error(`Invalid participant ID: ${id}`);
+        }
+        return (personas as any)[id];
+    });
 
-    for (const participantId of participants) {
-      if (!(personas as any)[participantId]) {
-        throw new Error(`Invalid participant ID: ${participantId}`);
-      }
+    const moderatorPersona = (personas as any)['moderator'];
+    if (!moderatorPersona) {
+        throw new Error('Moderator persona not found.');
     }
 
-    for (let round = 1; round <= rounds; round++) {
-      const shuffledParticipants = [...participants].sort(() => Math.random() - 0.5);
-
-      for (const agentId of shuffledParticipants) {
-        const persona = (personas as any)[agentId];
-        const promptInput = {
-          topic: topic,
-          persona: persona,
-          round: round,
-          transcript: transcript,
-        };
-
-        const response = await ai.generate({
-          model: ollama(persona.ollamaModel),
-          prompt: await debatePrompt.render(promptInput),
-          output: {
-            format: 'text'
-          }
-        });
-
-        const text = response.text;
+    const generateTurn = async (persona: any, text: string) => {
         const turnData: {speaker: string; text: string; audioFile?: string} = {
             speaker: persona.name,
             text: text,
@@ -303,13 +355,62 @@ const generateHistoricalDebateFlow = ai.defineFlow(
             }
         }
         transcript.push(turnData);
+    };
+
+    // Moderator Intro
+    const introText = await ai.generate({
+        model: ollama(moderatorPersona.ollamaModel),
+        prompt: await moderatorIntroPrompt.render({ topic, participants: participantPersonas }),
+        output: { format: 'text' },
+    });
+    await generateTurn(moderatorPersona, introText.text);
+
+
+    for (let round = 1; round <= rounds; round++) {
+      // Moderator Transition
+      const transitionText = await ai.generate({
+        model: ollama(moderatorPersona.ollamaModel),
+        prompt: await moderatorTransitionPrompt.render({ topic, round, transcript }),
+        output: { format: 'text' },
+      });
+      await generateTurn(moderatorPersona, transitionText.text);
+
+      const shuffledParticipants = [...participants].sort(() => Math.random() - 0.5);
+
+      for (const agentId of shuffledParticipants) {
+        const persona = (personas as any)[agentId];
+        const promptInput = {
+          topic: topic,
+          persona: persona,
+          round: round,
+          transcript: transcript,
+        };
+
+        const response = await ai.generate({
+          model: ollama(persona.ollamaModel),
+          prompt: await debatePrompt.render(promptInput),
+          output: {
+            format: 'text'
+          }
+        });
+
+        await generateTurn(persona, response.text);
       }
     }
     
+    // Moderator Outro
+    const outroText = await ai.generate({
+        model: ollama(moderatorPersona.ollamaModel),
+        prompt: await moderatorOutroPrompt.render({ topic, transcript }),
+        output: { format: 'text' },
+    });
+    await generateTurn(moderatorPersona, outroText.text);
+
+
     let podcastFile = '';
     let duration = '0:00';
 
-    if (generateAudio && transcript.some(t => t.audioFile)) {
+    if (generateAudio) {
         const audioFilesToConcat = transcript.filter(t => t.audioFile);
         if (audioFilesToConcat.length > 0) {
             podcastFile = 'final_debate.mp3';
@@ -319,10 +420,10 @@ const generateHistoricalDebateFlow = ai.defineFlow(
             const concatListContent = audioFilesToConcat
               .map(turn => `file '${path.join(process.cwd(), 'public', turn.audioFile!)}'`)
               .join('\n');
-            await fs.writeFile(concatListPath, concatListContent);
-
+            
             try {
-              await fs.unlink(podcastFilePath).catch(() => {});
+              await fs.writeFile(concatListPath, concatListContent);
+              await fs.unlink(podcastFilePath).catch(() => {}); // Delete old file if exists
               const command = `ffmpeg -f concat -safe 0 -i ${concatListPath} -c:a libmp3lame -q:a 2 ${podcastFilePath}`;
               await execAsync(command);
               duration = '12:45'; // Dummy duration for now
