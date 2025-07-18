@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useTransition } from 'react';
+import React, { useState, useTransition, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -42,25 +42,22 @@ const addPersonaSchema = z.object({
   ollamaModel: z.string().min(1, "Please select a model."),
 });
 
-// For local dev, use Gemini voices. For prod, use ElevenLabs.
-// The USE_LOCAL_TTS env var is read on the server to determine which tool to use.
-const availableVoices = (process.env.NEXT_PUBLIC_USE_LOCAL_TTS === 'true'
- ? [
+const localVoices = [
     { id: "Algenib", name: "Algenib (Local)" },
     { id: "Achernar", name: "Achernar (Local)" },
     { id: "Enif", name: "Enif (Local)" },
     { id: "Fomalhaut", name: "Fomalhaut (Local)" },
     { id: "Deneb", name: "Deneb (Local)" },
     { id: "Canopus", name: "Canopus (Local)" },
- ]
- : [
+];
+ 
+const elevenLabsVoices = [
     { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel (ElevenLabs)" },
     { id: "2EiwWnXFnvU5JabPnv8n", name: "Clyde (ElevenLabs)" },
     { id: "AZnzlk1XvdvUeBnXmlld", name: "Domi (ElevenLabs)" },
     { id: "D38z5RcWu1voky8WS1ja", name: "Dave (ElevenLabs)" },
     { id: "VR6AewLTigWG4xSOukaG", name: "Fin (ElevenLabs)" },
-]);
-
+];
 
 const ollamaModels = ["mistral", "qwen3:8b"];
 
@@ -77,6 +74,14 @@ export function AddParticipantDialog({
 }: AddParticipantDialogProps) {
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
+  
+  const [availableVoices, setAvailableVoices] = useState(elevenLabsVoices);
+
+  useEffect(() => {
+    // This effect runs only on the client, where process.env is safely accessible
+    const useLocal = process.env.NEXT_PUBLIC_USE_LOCAL_TTS === 'true';
+    setAvailableVoices(useLocal ? localVoices : elevenLabsVoices);
+  }, []);
 
   const form = useForm<z.infer<typeof addPersonaSchema>>({
     resolver: zodResolver(addPersonaSchema),
