@@ -15,7 +15,7 @@ import path from 'path';
 import {promisify} from 'util';
 import {exec} from 'child_process';
 import wav from 'wav';
-import personas from '../personas.js';
+import personas from '@/ai/personas.js';
 
 const execAsync = promisify(exec);
 
@@ -179,7 +179,7 @@ const generateHistoricalDebateFlow = ai.defineFlow(
 
     // Validate participants against available personas
     for (const participantId of participants) {
-      if (!personas[participantId]) {
+      if (!(personas as any)[participantId]) {
         throw new Error(`Invalid participant ID: ${participantId}`);
       }
     }
