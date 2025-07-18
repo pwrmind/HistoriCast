@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -299,6 +300,7 @@ const generateHistoricalDebateFlow = ai.defineFlow(
     const podcastFile = 'final_debate.mp3';
     const concatListPath = path.join(process.cwd(), 'public', 'concat_list.txt');
     const podcastFilePath = path.join(process.cwd(), 'public', podcastFile);
+
     const concatListContent = transcript
       .map(turn => `file '${path.join(process.cwd(), 'public', turn.audioFile)}'`)
       .join('\n');
