@@ -1,10 +1,52 @@
-import {genkit} from 'genkit';
+'use server';
+
+import {genkit, GenkitPlugin} from 'genkit';
 import {googleAI} from '@genkit-ai/googleai';
 import {ollama} from 'genkitx-ollama';
+import * as dotenv from 'dotenv';
 
-// Note: The ollama plugin in genkitx-ollama@0.5.2 is an object, not a function.
-// It is configured via environment variables or a local `~/.ollama/config.json` file,
-// not by passing a configuration object here.
+dotenv.config();
+
+const plugins: GenkitPlugin[] = [];
+let googleConfigured = false;
+
+// Use Google AI if an API key is available
+if (process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY) {
+  plugins.push(googleAI());
+  googleConfigured = true;
+  console.log('Using Google AI Gemini model.');
+}
+
+// In a local development environment, add Ollama.
+// It can be used alongside Google AI or as a fallback.
+if (process.env.NODE_ENV === 'development') {
+  console.log('Development environment detected. Configuring Ollama.');
+  plugins.unshift(
+    ollama({
+      models: [
+        {name: 'mistral', type: 'generate'},
+        {name: 'llama3', type: 'generate'},
+      ],
+      serverAddress: 'http://127.0.0.1:11434', // default ollama address
+    })
+  );
+  if (!googleConfigured) {
+    console.log('Defaulting to Ollama for AI generation.');
+  } else {
+    console.log(
+      'Ollama is available, but Google AI is also configured and may be used.'
+    );
+  }
+}
+
+if (plugins.length === 0) {
+  throw new Error(
+    'No AI plugins configured. Please set GOOGLE_API_KEY or ensure you are in a development environment with Ollama running.'
+  );
+}
+
 export const ai = genkit({
-  plugins: [googleAI(), ollama],
+  plugins,
+  // The 'logLevel' option is deprecated in Genkit v1.x and should not be used.
+  // Logging can be configured through environment variables if needed.
 });
