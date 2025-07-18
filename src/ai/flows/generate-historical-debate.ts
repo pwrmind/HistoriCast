@@ -36,6 +36,7 @@ const GenerateHistoricalDebateInputSchema = z.object({
   topic: z.string().describe('The topic of the debate.'),
   rounds: z.number().int().min(1).describe('The number of debate rounds.'),
   participants: z.array(z.string()).min(2).describe('An array of participant IDs (keys from the personas object).'),
+  generateAudio: z.boolean().describe('Whether to generate audio for the debate.'),
 });
 
 export type GenerateHistoricalDebateInput = z.infer<typeof GenerateHistoricalDebateInputSchema>;
@@ -48,11 +49,12 @@ const GenerateHistoricalDebateOutputSchema = z.object({
       z.object({
         speaker: z.string(),
         text: z.string(),
-        audioFile: z.string(),
+        audioFile: z.string().optional(),
       })
     ),
     podcast: z.string(),
     duration: z.string(),
+    audioGenerated: z.boolean(),
   }),
 });
 
@@ -209,7 +211,7 @@ const debatePrompt = ai.definePrompt({
         z.object({
           speaker: z.string(),
           text: z.string(),
-          audioFile: z.string().optional(), // make optional here
+          audioFile: z.string().optional(),
         })
       ),
     })
@@ -234,21 +236,18 @@ const generateHistoricalDebateFlow = ai.defineFlow(
     outputSchema: GenerateHistoricalDebateOutputSchema,
   },
   async input => {
-    const {topic, rounds, participants} = input;
+    const {topic, rounds, participants, generateAudio} = input;
     const useLocalTTS = process.env.USE_LOCAL_TTS === 'true';
 
-    const transcript: {speaker: string; text: string; audioFile: string}[] = [];
+    const transcript: {speaker: string; text: string; audioFile?: string}[] = [];
 
-    // Validate participants against available personas
     for (const participantId of participants) {
       if (!(personas as any)[participantId]) {
         throw new Error(`Invalid participant ID: ${participantId}`);
       }
     }
 
-    // Debate loop
     for (let round = 1; round <= rounds; round++) {
-      // Shuffle participants for turn order
       const shuffledParticipants = [...participants].sort(() => Math.random() - 0.5);
 
       for (const agentId of shuffledParticipants) {
@@ -257,7 +256,6 @@ const generateHistoricalDebateFlow = ai.defineFlow(
           topic: topic,
           persona: persona,
           round: round,
-          // Pass only speaker and text to the prompt as audioFile is not needed
           transcript: transcript.map(t => ({ speaker: t.speaker, text: t.text })),
         };
 
@@ -270,74 +268,80 @@ const generateHistoricalDebateFlow = ai.defineFlow(
         });
 
         const text = response.text;
+        const turnData: {speaker: string; text: string; audioFile?: string} = {
+            speaker: persona.name,
+            text: text,
+        };
 
-        let audioBase64: string | undefined;
-        try {
-            if (useLocalTTS) {
-                 audioBase64 = await synthesizeSpeechLocal({
-                    text: text,
-                    voiceId: persona.voiceId, // voiceId now refers to Gemini voices
-                 });
-            } else {
-                 audioBase64 = await synthesizeSpeechElevenLabs({
-                    text: text,
-                    voiceId: persona.voiceId,
-                });
+        if (generateAudio) {
+            let audioBase64: string | undefined;
+            try {
+                if (useLocalTTS) {
+                     audioBase64 = await synthesizeSpeechLocal({
+                        text: text,
+                        voiceId: persona.voiceId,
+                     });
+                } else {
+                     audioBase64 = await synthesizeSpeechElevenLabs({
+                        text: text,
+                        voiceId: persona.voiceId,
+                    });
+                }
+                
+                if (audioBase64) {
+                    const audioFile = `clip_${transcript.length}.wav`;
+                    const audioFilePath = path.join(process.cwd(), 'public', audioFile);
+                    const buffer = Buffer.from(audioBase64, 'base64');
+                    await fs.writeFile(audioFilePath, buffer);
+                    turnData.audioFile = audioFile;
+                } else {
+                     console.error(`Skipping audio for ${persona.name} because audio data is empty.`);
+                }
+
+            } catch (error) {
+                console.error(`Skipping audio for ${persona.name} due to TTS error:`, error);
             }
-        } catch (error) {
-            console.error(`Skipping audio for ${persona.name} due to TTS error:`, error);
-            continue; // Skip this turn if TTS fails
         }
-        
-        if (!audioBase64) {
-             console.error(`Skipping audio for ${persona.name} because audio data is empty.`);
-             continue; // Skip if audio data is empty for any reason
-        }
-
-        const audioFile = `clip_${transcript.length}.wav`;
-        const audioFilePath = path.join(process.cwd(), 'public', audioFile);
-        const buffer = Buffer.from(audioBase64, 'base64');
-        await fs.writeFile(audioFilePath, buffer);
-
-        transcript.push({
-          speaker: persona.name,
-          text: text,
-          audioFile: audioFile,
-        });
+        transcript.push(turnData);
       }
     }
+    
+    let podcastFile = '';
+    let duration = '0:00';
 
-    // Concatenate audio files using FFmpeg
-    const podcastFile = 'final_debate.mp3';
-    const concatListPath = path.join(process.cwd(), 'public', 'concat_list.txt');
-    const podcastFilePath = path.join(process.cwd(), 'public', podcastFile);
+    if (generateAudio && transcript.some(t => t.audioFile)) {
+        const audioFilesToConcat = transcript.filter(t => t.audioFile);
+        if (audioFilesToConcat.length > 0) {
+            podcastFile = 'final_debate.mp3';
+            const concatListPath = path.join(process.cwd(), 'public', 'concat_list.txt');
+            const podcastFilePath = path.join(process.cwd(), 'public', podcastFile);
 
-    const concatListContent = transcript
-      .map(turn => `file '${path.join(process.cwd(), 'public', turn.audioFile)}'`)
-      .join('\n');
-    await fs.writeFile(concatListPath, concatListContent);
+            const concatListContent = audioFilesToConcat
+              .map(turn => `file '${path.join(process.cwd(), 'public', turn.audioFile!)}'`)
+              .join('\n');
+            await fs.writeFile(concatListPath, concatListContent);
 
-    try {
-      // Ensure the output file from previous run is removed
-      await fs.unlink(podcastFilePath).catch(() => {});
-      const command = `ffmpeg -f concat -safe 0 -i ${concatListPath} -c:a libmp3lame -q:a 2 ${podcastFilePath}`;
-      await execAsync(command);
-    } catch (e) {
-      console.error('Error running ffmpeg', e);
-      throw e;
-    } finally {
-      await fs.unlink(concatListPath);
+            try {
+              await fs.unlink(podcastFilePath).catch(() => {});
+              const command = `ffmpeg -f concat -safe 0 -i ${concatListPath} -c:a libmp3lame -q:a 2 ${podcastFilePath}`;
+              await execAsync(command);
+              duration = '12:45'; // Dummy duration for now
+            } catch (e) {
+              console.error('Error running ffmpeg', e);
+              podcastFile = ''; // Reset if ffmpeg fails
+            } finally {
+              await fs.unlink(concatListPath);
+            }
+        }
     }
-
-    // Calculate the duration of the podcast (dummy implementation for now)
-    const duration = '12:45';
-
+    
     return {
       status: 'success',
       data: {
         transcript: transcript,
         podcast: podcastFile,
         duration: duration,
+        audioGenerated: generateAudio,
       },
     };
   }

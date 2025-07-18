@@ -17,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import {
   Card,
   CardContent,
@@ -44,6 +45,7 @@ export const debateFormSchema = z.object({
   }).refine((value) => value.length <= 5, {
     message: 'You can select at most five participants.',
   }),
+  generateAudio: z.boolean().default(true),
 });
 
 type DebateFormProps = {
@@ -62,6 +64,7 @@ export function DebateForm({ onFormSubmit, isPending }: DebateFormProps) {
       topic: "The Future of Humanity",
       rounds: 2,
       participants: ['tesla', 'nietzsche'],
+      generateAudio: true,
     },
   });
 
@@ -176,11 +179,34 @@ export function DebateForm({ onFormSubmit, isPending }: DebateFormProps) {
                 )}
               />
 
+              <FormField
+                control={form.control}
+                name="generateAudio"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        Generate Audio
+                      </FormLabel>
+                      <FormDescription>
+                        Create audio files for the debate podcast.
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
               <Button type="submit" disabled={isPending} className="w-full" size="lg">
                 {isPending ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Generating Podcast...
+                    Generating...
                   </>
                 ) : (
                   'Generate Debate'

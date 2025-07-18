@@ -47,49 +47,56 @@ export function DebateResult({ data }: DebateResultProps) {
   };
 
   useEffect(() => {
-    // Pre-create audio elements and set up ended listeners
-    data.transcript.forEach(turn => {
-      if (!audioRefs.current[turn.audioFile]) {
-        const audio = new Audio(`/${turn.audioFile}`);
-        audio.addEventListener('ended', () => setActiveAudioFile(null));
-        audioRefs.current[turn.audioFile] = audio;
-      }
-    });
+    if (data.audioGenerated) {
+        // Pre-create audio elements and set up ended listeners
+        data.transcript.forEach(turn => {
+          if (turn.audioFile && !audioRefs.current[turn.audioFile]) {
+            const audio = new Audio(`/${turn.audioFile}`);
+            audio.addEventListener('ended', () => setActiveAudioFile(null));
+            audioRefs.current[turn.audioFile] = audio;
+          }
+        });
 
-    return () => { // Cleanup on component unmount
-      Object.values(audioRefs.current).forEach(audio => {
-        audio.pause();
-        audio.removeEventListener('ended', () => setActiveAudioFile(null));
-        audio.src = '';
-      });
-      audioRefs.current = {};
-    };
-  }, [data.transcript]);
+        return () => { // Cleanup on component unmount
+          Object.values(audioRefs.current).forEach(audio => {
+            audio.pause();
+            audio.removeEventListener('ended', () => setActiveAudioFile(null));
+            audio.src = '';
+          });
+          audioRefs.current = {};
+        };
+    }
+  }, [data.transcript, data.audioGenerated]);
 
   return (
     <Card className="shadow-lg">
       <CardHeader>
-        <CardTitle className="font-headline text-2xl tracking-wide">Podcast Ready</CardTitle>
-        <CardDescription>Listen to the full debate or browse the transcript.</CardDescription>
+        <CardTitle className="font-headline text-2xl tracking-wide">Debate Ready</CardTitle>
+        <CardDescription>
+          {data.audioGenerated ? "Listen to the full debate or browse the transcript." : "Browse the generated debate transcript."}
+        </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="bg-muted p-4 rounded-lg flex flex-col sm:flex-row items-center gap-4">
-          <div className="flex-grow">
-            <h3 className="font-semibold text-lg">Full Debate Episode</h3>
-            <p className="text-sm text-muted-foreground">Duration: {data.duration}</p>
-          </div>
-          <audio controls src={`/${data.podcast}`} className="w-full sm:w-auto">
-            Your browser does not support the audio element.
-          </audio>
-          <Button asChild variant="secondary">
-            <a href={`/${data.podcast}`} download>
-              <Download className="mr-2 h-4 w-4" />
-              Download
-            </a>
-          </Button>
-        </div>
-
-        <Separator className="my-6" />
+        {data.audioGenerated && data.podcast && (
+          <>
+            <div className="bg-muted p-4 rounded-lg flex flex-col sm:flex-row items-center gap-4">
+              <div className="flex-grow">
+                <h3 className="font-semibold text-lg">Full Debate Episode</h3>
+                <p className="text-sm text-muted-foreground">Duration: {data.duration}</p>
+              </div>
+              <audio controls src={`/${data.podcast}`} className="w-full sm:w-auto">
+                Your browser does not support the audio element.
+              </audio>
+              <Button asChild variant="secondary">
+                <a href={`/${data.podcast}`} download>
+                  <Download className="mr-2 h-4 w-4" />
+                  Download
+                </a>
+              </Button>
+            </div>
+            <Separator className="my-6" />
+          </>
+        )}
 
         <div>
           <h3 className="text-xl font-headline font-semibold mb-4">Transcript</h3>
@@ -103,9 +110,11 @@ export function DebateResult({ data }: DebateResultProps) {
                 <div className="flex-1">
                   <div className="flex items-center justify-between">
                     <p className="font-bold">{turn.speaker}</p>
-                    <Button variant="ghost" size="icon" onClick={() => togglePlay(turn.audioFile)} className="h-8 w-8">
-                      {activeAudioFile === turn.audioFile ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                    </Button>
+                    {data.audioGenerated && turn.audioFile && (
+                      <Button variant="ghost" size="icon" onClick={() => togglePlay(turn.audioFile!)} className="h-8 w-8">
+                        {activeAudioFile === turn.audioFile ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                      </Button>
+                    )}
                   </div>
                   <p className="text-muted-foreground mt-1">{turn.text}</p>
                 </div>

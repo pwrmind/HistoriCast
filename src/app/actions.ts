@@ -11,6 +11,7 @@ const DebateInputSchema = z.object({
   topic: z.string().min(3, "Topic must be at least 3 characters long."),
   rounds: z.coerce.number().int().min(1).max(5),
   participants: z.array(z.string()).min(2, "Select at least two participants.").max(5, "Select at most five participants."),
+  generateAudio: z.boolean(),
 });
 
 const AddPersonaSchema = z.object({
