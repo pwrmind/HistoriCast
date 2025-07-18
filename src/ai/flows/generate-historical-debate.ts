@@ -16,6 +16,7 @@ import {promisify} from 'util';
 import {exec} from 'child_process';
 import wav from 'wav';
 import personas from '@/ai/personas.js';
+import { ollama } from 'genkitx-ollama';
 
 const execAsync = promisify(exec);
 
@@ -133,29 +134,24 @@ async function toWav(
   }
 }
 
-const buildPrompt = (topic: string, persona: any, round: number, transcript: any) => {
-  let history = '';
-  for (const turn of transcript) {
-    history += `${turn.speaker}: ${turn.text}\n`;
-  }
-  return `${persona.systemPrompt}\n\nYou are participating in a debate about ${topic}. This is round ${round}.\n\nPrevious turns:\n${history}\n\nRespond with 1-2 sentences.`;
-};
-
 const debatePrompt = ai.definePrompt({
   name: 'debatePrompt',
-  input: z.object({
-    topic: z.string(),
-    persona: PersonaSchema,
-    round: z.number(),
-    transcript: z.array(
-      z.object({
-        speaker: z.string(),
-        text: z.string(),
-      })
-    ),
-  }),
-  output: z.string(),
-  tools: [synthesizeSpeech],
+  input: {
+    schema: z.object({
+      topic: z.string(),
+      persona: PersonaSchema,
+      round: z.number(),
+      transcript: z.array(
+        z.object({
+          speaker: z.string(),
+          text: z.string(),
+        })
+      ),
+    })
+  },
+  output: {
+    schema: z.string(),
+  },
   prompt: `{{{persona.systemPrompt}}}\n
 You are participating in a debate about {{{topic}}}. This is round {{{round}}}.\n
 Previous turns:
@@ -198,8 +194,15 @@ const generateHistoricalDebateFlow = ai.defineFlow(
           transcript: transcript,
         };
 
-        const response = await debatePrompt(promptInput);
-        const text = response.output!;
+        const response = await ai.generate({
+          model: ollama(persona.ollamaModel),
+          prompt: await debatePrompt.render(promptInput),
+          output: {
+            format: 'text'
+          }
+        });
+
+        const text = response.text;
 
         // Synthesize speech using the ElevenLabs tool
         const audioBase64 = await synthesizeSpeech({

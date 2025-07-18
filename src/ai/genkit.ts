@@ -23,6 +23,5 @@ export const ai = genkit({
       serverAddress: 'http://127.0.0.1:11434',
     }),
   ],
-  logLevel: 'debug',
   enableTracingAndMetrics: true,
 });
