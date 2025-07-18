@@ -44,7 +44,7 @@ const addPersonaSchema = z.object({
 
 // For local dev, use Gemini voices. For prod, use ElevenLabs.
 // The USE_LOCAL_TTS env var is read on the server to determine which tool to use.
-const availableVoices = process.env.NEXT_PUBLIC_USE_LOCAL_TTS === 'true'
+const availableVoices = (process.env.NEXT_PUBLIC_USE_LOCAL_TTS === 'true'
  ? [
     { id: "Algenib", name: "Algenib (Local)" },
     { id: "Achernar", name: "Achernar (Local)" },
@@ -59,7 +59,7 @@ const availableVoices = process.env.NEXT_PUBLIC_USE_LOCAL_TTS === 'true'
     { id: "AZnzlk1XvdvUeBnXmlld", name: "Domi (ElevenLabs)" },
     { id: "D38z5RcWu1voky8WS1ja", name: "Dave (ElevenLabs)" },
     { id: "VR6AewLTigWG4xSOukaG", name: "Fin (ElevenLabs)" },
-];
+]);
 
 
 const ollamaModels = ["mistral", "qwen3:8b"];
