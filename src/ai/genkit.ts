@@ -21,15 +21,9 @@ if (process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY) {
 // It can be used alongside Google AI or as a fallback.
 if (process.env.NODE_ENV === 'development') {
   console.log('Development environment detected. Configuring Ollama.');
-  plugins.unshift(
-    ollama({
-      models: [
-        {name: 'mistral', type: 'generate'},
-        {name: 'llama3', type: 'generate'},
-      ],
-      serverAddress: 'http://127.0.0.1:11434', // default ollama address
-    })
-  );
+  // In genkitx-ollama@0.5.2, `ollama` is the plugin object itself, not a function.
+  plugins.unshift(ollama);
+  
   if (!googleConfigured) {
     console.log('Defaulting to Ollama for AI generation.');
   } else {
