@@ -256,7 +256,7 @@ const generateHistoricalDebateFlow = ai.defineFlow(
           topic: topic,
           persona: persona,
           round: round,
-          transcript: transcript.map(t => ({ speaker: t.speaker, text: t.text })),
+          transcript: transcript, // Pass the full transcript object
         };
 
         const response = await ai.generate({
