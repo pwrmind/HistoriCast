@@ -17,6 +17,7 @@ import {exec} from 'child_process';
 import wav from 'wav';
 import personas from '@/ai/personas.js';
 import { ollama } from 'genkitx-ollama';
+import { googleAI } from '@genkit-ai/googleai';
 
 const execAsync = promisify(exec);
 
@@ -57,9 +58,9 @@ const GenerateHistoricalDebateOutputSchema = z.object({
 export type GenerateHistoricalDebateOutput = z.infer<typeof GenerateHistoricalDebateOutputSchema>;
 
 // Define the tool to synthesize speech using ElevenLabs API
-const synthesizeSpeech = ai.defineTool(
+const synthesizeSpeechElevenLabs = ai.defineTool(
   {
-    name: 'synthesizeSpeech',
+    name: 'synthesizeSpeechElevenLabs',
     description: 'Synthesizes speech from text using the ElevenLabs API.',
     inputSchema: z.object({
       text: z.string().describe('The text to synthesize.'),
@@ -99,7 +100,8 @@ const synthesizeSpeech = ai.defineTool(
       }
 
       const buffer = Buffer.from(await response.arrayBuffer());
-      return await toWav(buffer);
+      const pcmBuffer = await convertMp3ToPcm(buffer);
+      return await toWav(pcmBuffer);
     } catch (error: any) {
       console.error('ElevenLabs API error:', error);
       throw new Error(`Failed to synthesize speech: ${error.message}`);
@@ -107,31 +109,92 @@ const synthesizeSpeech = ai.defineTool(
   }
 );
 
+
+const synthesizeSpeechLocal = ai.defineTool(
+  {
+    name: 'synthesizeSpeechLocal',
+    description: 'Synthesizes speech from text using a local Gemini TTS model.',
+    inputSchema: z.object({
+      text: z.string().describe('The text to synthesize.'),
+      voiceId: z.string().describe('The prebuilt voice name to use (e.g., Algenib, Achernar).'),
+    }),
+    outputSchema: z.string().describe('The base64 encoded audio data in WAV format.'),
+  },
+  async input => {
+    try {
+      const { media } = await ai.generate({
+        model: googleAI.model('gemini-2.5-flash-preview-tts'),
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: input.voiceId },
+            },
+          },
+        },
+        prompt: input.text,
+      });
+      if (!media) {
+        throw new Error('No media returned from local TTS model.');
+      }
+      const audioBuffer = Buffer.from(
+        media.url.substring(media.url.indexOf(',') + 1),
+        'base64'
+      );
+      return await toWav(audioBuffer);
+    } catch (error: any) {
+        console.error('Local TTS error:', error);
+        throw new Error(`Failed to synthesize speech locally: ${error.message}`);
+    }
+  }
+);
+
+
+async function convertMp3ToPcm(mp3Data: Buffer): Promise<Buffer> {
+    const tempInPath = path.join(process.cwd(), `temp-in-${Date.now()}.mp3`);
+    const tempOutPath = path.join(process.cwd(), `temp-out-${Date.now()}.s16le`);
+    try {
+        await fs.writeFile(tempInPath, mp3Data);
+        // Use ffmpeg to convert mp3 to pcm s16le
+        const command = `ffmpeg -i ${tempInPath} -f s16le -acodec pcm_s16le -ar 24000 -ac 1 ${tempOutPath}`;
+        await execAsync(command);
+        const pcmData = await fs.readFile(tempOutPath);
+        return pcmData;
+    } catch (e) {
+        console.error('Error converting MP3 to PCM', e);
+        throw e;
+    } finally {
+        await fs.unlink(tempInPath).catch(console.error);
+        await fs.unlink(tempOutPath).catch(console.error);
+    }
+}
+
+
 async function toWav(
-  mp3Data: Buffer,
+  pcmData: Buffer,
   channels = 1,
   rate = 24000,
   sampleWidth = 2
 ): Promise<string> {
-  // Convert mp3 to pcm
-  const tempPcmPath = path.join(process.cwd(), 'temp.pcm');
-  const tempWavPath = path.join(process.cwd(), 'temp.wav');
+  return new Promise((resolve, reject) => {
+    const writer = new wav.Writer({
+      channels,
+      sampleRate: rate,
+      bitDepth: sampleWidth * 8,
+    });
 
-  try {
-    await fs.writeFile(tempPcmPath, mp3Data);
-    // Use ffmpeg to convert mp3 to wav
-    const command = `ffmpeg -f mp3 -i ${tempPcmPath} -acodec pcm_s16le -ac 1 -ar 24000 ${tempWavPath}`;
-    await execAsync(command);
+    let bufs: Buffer[] = [];
+    writer.on('error', reject);
+    writer.on('data', function (d: Buffer) {
+      bufs.push(d);
+    });
+    writer.on('end', function () {
+      resolve(Buffer.concat(bufs).toString('base64'));
+    });
 
-    const fileContent = await fs.readFile(tempWavPath);
-    return fileContent.toString('base64');
-  } catch (e) {
-    console.error('Error converting to wav', e);
-    throw e;
-  } finally {
-    // await fs.unlink(tempPcmPath);
-    // await fs.unlink(tempWavPath);
-  }
+    writer.write(pcmData);
+    writer.end();
+  });
 }
 
 const debatePrompt = ai.definePrompt({
@@ -159,7 +222,7 @@ Previous turns:
 {{{speaker}}}: {{{text}}}
 {{/each}}
 
-Respond with 1-2 sentences.`, // Corrected Handlebars syntax
+Respond with 1-2 sentences.`,
 });
 
 const generateHistoricalDebateFlow = ai.defineFlow(
@@ -170,6 +233,7 @@ const generateHistoricalDebateFlow = ai.defineFlow(
   },
   async input => {
     const {topic, rounds, participants} = input;
+    const useLocalTTS = process.env.USE_LOCAL_TTS === 'true';
 
     const transcript: {speaker: string; text: string; audioFile: string}[] = [];
 
@@ -204,14 +268,21 @@ const generateHistoricalDebateFlow = ai.defineFlow(
 
         const text = response.text;
 
-        // Synthesize speech using the ElevenLabs tool
-        const audioBase64 = await synthesizeSpeech({
-          text: text,
-          voiceId: persona.voiceId,
-        });
+        let audioBase64: string;
+        if (useLocalTTS) {
+             audioBase64 = await synthesizeSpeechLocal({
+                text: text,
+                voiceId: persona.voiceId, // voiceId now refers to Gemini voices
+             });
+        } else {
+             audioBase64 = await synthesizeSpeechElevenLabs({
+                text: text,
+                voiceId: persona.voiceId,
+            });
+        }
 
-        const audioFile = `clip_${transcript.length}.wav`; // Changed to WAV
-        //Save the file to the public directory
+
+        const audioFile = `clip_${transcript.length}.wav`;
         const audioFilePath = path.join(process.cwd(), 'public', audioFile);
         const buffer = Buffer.from(audioBase64, 'base64');
         await fs.writeFile(audioFilePath, buffer);
@@ -234,7 +305,9 @@ const generateHistoricalDebateFlow = ai.defineFlow(
     await fs.writeFile(concatListPath, concatListContent);
 
     try {
-      const command = `ffmpeg -f concat -safe 0 -i ${concatListPath} -c copy ${podcastFilePath}`;
+      // Ensure the output file from previous run is removed
+      await fs.unlink(podcastFilePath).catch(() => {});
+      const command = `ffmpeg -f concat -safe 0 -i ${concatListPath} -c:a libmp3lame -q:a 2 ${podcastFilePath}`;
       await execAsync(command);
     } catch (e) {
       console.error('Error running ffmpeg', e);
@@ -243,7 +316,7 @@ const generateHistoricalDebateFlow = ai.defineFlow(
       await fs.unlink(concatListPath);
     }
 
-    // Calculate the duration of the podcast (dummy implementation)
+    // Calculate the duration of the podcast (dummy implementation for now)
     const duration = '12:45';
 
     return {
