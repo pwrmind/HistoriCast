@@ -198,7 +198,7 @@ export function AddParticipantDialog({
                           <FormControl>
                             <SelectTrigger>
                                 <SelectValue placeholder="Select a model" />
-                            </Trigger>
+                            </SelectTrigger>
                            </FormControl>
                           <SelectContent>
                             {ollamaModels.map(model => (
