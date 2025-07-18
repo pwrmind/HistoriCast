@@ -62,7 +62,7 @@ const availableVoices = process.env.NEXT_PUBLIC_USE_LOCAL_TTS === 'true'
 ];
 
 
-const ollamaModels = ["mistral", "llama3"];
+const ollamaModels = ["mistral", "qwen3:8b"];
 
 type AddParticipantDialogProps = {
   isOpen: boolean;
@@ -203,7 +203,7 @@ export function AddParticipantDialog({
                           <FormControl>
                             <SelectTrigger>
                                 <SelectValue placeholder="Select a model" />
-                            </SelectTrigger>
+                            </Trigger>
                            </FormControl>
                           <SelectContent>
                             {ollamaModels.map(model => (
