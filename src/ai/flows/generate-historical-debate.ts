@@ -209,6 +209,7 @@ const debatePrompt = ai.definePrompt({
         z.object({
           speaker: z.string(),
           text: z.string(),
+          audioFile: z.string().optional(), // make optional here
         })
       ),
     })
@@ -256,7 +257,8 @@ const generateHistoricalDebateFlow = ai.defineFlow(
           topic: topic,
           persona: persona,
           round: round,
-          transcript: transcript,
+          // Pass only speaker and text to the prompt as audioFile is not needed
+          transcript: transcript.map(t => ({ speaker: t.speaker, text: t.text })),
         };
 
         const response = await ai.generate({
