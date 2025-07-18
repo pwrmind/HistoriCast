@@ -271,19 +271,28 @@ const generateHistoricalDebateFlow = ai.defineFlow(
 
         const text = response.text;
 
-        let audioBase64: string;
-        if (useLocalTTS) {
-             audioBase64 = await synthesizeSpeechLocal({
-                text: text,
-                voiceId: persona.voiceId, // voiceId now refers to Gemini voices
-             });
-        } else {
-             audioBase64 = await synthesizeSpeechElevenLabs({
-                text: text,
-                voiceId: persona.voiceId,
-            });
+        let audioBase64: string | undefined;
+        try {
+            if (useLocalTTS) {
+                 audioBase64 = await synthesizeSpeechLocal({
+                    text: text,
+                    voiceId: persona.voiceId, // voiceId now refers to Gemini voices
+                 });
+            } else {
+                 audioBase64 = await synthesizeSpeechElevenLabs({
+                    text: text,
+                    voiceId: persona.voiceId,
+                });
+            }
+        } catch (error) {
+            console.error(`Skipping audio for ${persona.name} due to TTS error:`, error);
+            continue; // Skip this turn if TTS fails
         }
-
+        
+        if (!audioBase64) {
+             console.error(`Skipping audio for ${persona.name} because audio data is empty.`);
+             continue; // Skip if audio data is empty for any reason
+        }
 
         const audioFile = `clip_${transcript.length}.wav`;
         const audioFilePath = path.join(process.cwd(), 'public', audioFile);
