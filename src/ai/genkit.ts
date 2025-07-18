@@ -1,5 +1,3 @@
-'use server';
-
 import {genkit, GenkitPlugin} from 'genkit';
 import {googleAI} from '@genkit-ai/googleai';
 import {ollama} from 'genkitx-ollama';
